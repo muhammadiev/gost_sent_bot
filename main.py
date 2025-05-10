@@ -1,73 +1,284 @@
+# import logging
+# import random
+# from aiogram import Bot, Dispatcher, types
+# from aiogram.filters import Command
+# from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+# from aiogram.fsm.storage.memory import MemoryStorage
+# from docx import Document
+# import asyncio
+#
+# # Bot configuration
+# TELEGRAM_BOT_TOKEN = "7063427428:AAEvheXmzXp8RbfMgLz0M-zQ3u2xS8-amN8"
+# logging.basicConfig(level=logging.INFO)
+#
+# bot = Bot(token=TELEGRAM_BOT_TOKEN)
+# dp = Dispatcher(storage=MemoryStorage())
+#
+#
+# def load_questions_from_docx(docx_path):
+#     """Load questions and answers from a .docx file."""
+#     questions = []
+#     try:
+#         document = Document(docx_path)
+#         for table in document.tables:
+#             for row in table.rows[1:]:  # Skip the header row
+#                 cells = row.cells
+#                 if len(cells) >= 5:
+#                     question_text = cells[1].text.strip() if cells[1].text.strip() else None
+#                     correct_answer = cells[2].text.strip() if cells[2].text.strip() else None
+#                     options = [
+#                         cells[2].text.strip(),
+#                         cells[3].text.strip(),
+#                         cells[4].text.strip(),
+#                         cells[5].text.strip(),
+#                     ]
+#                     # Validate question and correct answer
+#                     if question_text and correct_answer:
+#                         random.shuffle(options)  # Shuffle the options
+#                         questions.append({
+#                             "question": question_text,
+#                             "correct": correct_answer,
+#                             "options": options,
+#                         })
+#                     else:
+#                         logging.warning("Skipped a question with missing text or correct answer.")
+#         logging.info(f"{len(questions)} questions loaded successfully.")
+#     except Exception as e:
+#         logging.error(f"Error loading questions from .docx: {e}")
+#     return questions
+#
+#
+# questions = load_questions_from_docx("quiz.docx")  # Replace with your .docx file path
+# user_scores = {}  # Dictionary to track user scores
+#
+#
+# # Command to start the quiz
+# @dp.message(Command("start"))
+# async def start_quiz(message: types.Message):
+#     user_scores[message.from_user.id] = {"score": 0, "index": 0}  # Initialize user score
+#     await message.answer(
+#         "Welcome to the Quiz Bot! Let's get started.\nType /help for commands."
+#     )
+#     await send_question(message.from_user.id)
+#
+#
+# # Command to display help
+# @dp.message(Command("help"))
+# async def help_command(message: types.Message):
+#     await message.answer(
+#         "Commands:\n/start - Start the quiz\n/help - Show help"
+#     )
+#
+#
+# # Send a question to the user
+# async def send_question(user_id):
+#     if user_id not in user_scores:
+#         return
+#
+#     user_data = user_scores[user_id]
+#     question_index = user_data["index"]
+#
+#     if question_index >= len(questions):
+#         # Quiz completed
+#         await bot.send_message(
+#             user_id, f"Quiz completed! 🎉\nYour final score: {user_data['score']} / {len(questions)}"
+#         )
+#         del user_scores[user_id]  # Clear user data
+#         return
+#
+#     # Send the current question
+#     question = questions[question_index]
+#     await bot.send_poll(
+#         chat_id=user_id,
+#         question=question["question"],
+#         options=question["options"],
+#         type="quiz",
+#         correct_option_id=question["options"].index(question["correct"]),
+#         is_anonymous=False,
+#     )
+#
+#
+# # Handle poll answers
+# @dp.poll_answer()
+# async def handle_poll_answer(poll_answer: types.PollAnswer):
+#     user_id = poll_answer.user.id
+#     if user_id not in user_scores:
+#         return
+#
+#     user_data = user_scores[user_id]
+#     question_index = user_data["index"]
+#     question = questions[question_index]
+#
+#     # Check if the answer is correct
+#     selected_option = poll_answer.option_ids[0] if poll_answer.option_ids else None
+#     if selected_option is not None:
+#         if question["options"][selected_option] == question["correct"]:
+#             user_data["score"] += 1
+#
+#     # Move to the next question
+#     user_data["index"] += 1
+#     await send_question(user_id)
+#
+#
+# # Main entry point to start the bot
+# async def main():
+#     await bot.delete_webhook(drop_pending_updates=True)
+#     await dp.start_polling(bot)
+#
+# if __name__ == "__main__":
+#     asyncio.run(main())
 import logging
-from aiogram import Bot, Dispatcher, Router, types
+import random
+from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.fsm.storage.memory import MemoryStorage
+from docx import Document
 import asyncio
-import requests
 
 # Bot configuration
-TELEGRAM_BOT_TOKEN = "7063427428:AAHIiKGXCuMjwgEhz5LeRYQtUXFN7bU4Lws"
-FASTAPI_SERVER_URL = "http://127.0.0.1:8000"  # Replace with your FastAPI server URL
-
-# Initialize bot, dispatcher, and router
+TELEGRAM_BOT_TOKEN = "7063427428:AAEvheXmzXp8RbfMgLz0M-zQ3u2xS8-amN8"  # Replace with your bot token
 logging.basicConfig(level=logging.INFO)
+
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
+
 dp = Dispatcher(storage=MemoryStorage())
-router = Router()
 
-# Start command handler
-@router.message(Command("start"))
-async def start_command(message: types.Message):
-    telegram_id = message.from_user.id
+MAX_OPTION_LENGTH = 100  # Telegram's maximum allowed length for poll options
 
-    # Create "Start Quiz" button linking to FastAPI site
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="Start Quiz",
-                    url=f"{FASTAPI_SERVER_URL}/?telegram_id={telegram_id}",
-                )
-            ]
-        ]
-    )
+bot = Bot(token=TELEGRAM_BOT_TOKEN, request_timeout=60)
 
-    # Send a welcome message with the button
+
+def load_questions_from_docx(docx_path):
+    """Load questions and answers from a .docx file."""
+    questions = []
+    try:
+        document = Document(docx_path)
+        for table in document.tables:
+            for row in table.rows[1:]:  # Skip the header row
+                cells = row.cells
+                if len(cells) >= 5:
+                    question_text = cells[1].text.strip()
+                    correct_answer = cells[2].text.strip()
+                    options = [
+                        cells[2].text.strip(),  # Correct answer
+                        cells[3].text.strip(),
+                        cells[4].text.strip(),
+                        cells[5].text.strip(),
+                    ]
+
+                    # Truncate only options exceeding MAX_OPTION_LENGTH
+                    options = [opt if len(opt) <= MAX_OPTION_LENGTH else opt[:MAX_OPTION_LENGTH-10] + "..." for opt in options]
+
+                    # Truncate correct answer if necessary
+                    correct_answer = correct_answer if len(correct_answer) <= MAX_OPTION_LENGTH else correct_answer[:MAX_OPTION_LENGTH-10] + "..."
+
+                    if question_text and correct_answer and all(options):
+                        random.shuffle(options)  # Shuffle the options
+                        questions.append({
+                            "question": question_text,
+                            "correct": correct_answer,
+                            "options": options,
+                        })
+                    else:
+                        logging.warning("Skipped a question with missing text or correct answer.")
+        logging.info(f"{len(questions)} questions loaded successfully.")
+    except Exception as e:
+        logging.error(f"Error loading questions from .docx: {e}")
+    return questions
+
+questions = load_questions_from_docx("qism.docx")  # Replace with your .docx file path
+user_scores = {}  # Dictionary to track user scores
+
+
+# Command to start the quiz
+@dp.message(Command("start"))
+async def start_quiz(message: types.Message):
+    user_scores[message.from_user.id] = {"score": 0, "index": 0,"amount":0}  # Initialize user score
     await message.answer(
-        "Qiuz gost ga xush kelibsiz!!! Quizni boshlash uchun pastdagi tugmani bosing",
-        reply_markup=keyboard,
+        "gost quiz botga xush kelibsiz.\nType /help kommadalar haqida."
     )
+    await send_question(message.from_user.id)
 
-# Help command handler
-@router.message(Command("help"))
+
+# Command to display help
+@dp.message(Command("end"))
+async def help_command(message: types.Message):
+    user_id = message.from_user.id
+    if user_id in user_scores:
+        score = user_scores[user_id]["score"]
+        mm=user_scores[user_id]["amount"]
+        del user_scores[user_id]  # Clear user data
+        await message.answer(f"Quiz ended!! 🎉. Your final score: {score}/{mm}\n qayta quizni boshlash uchun /start ni bosing")
+    else:
+        await message.answer("You haven't started a quiz yet. Type /start to begin.")
+
+@dp.message(Command("help"))
 async def help_command(message: types.Message):
     await message.answer(
-        "This bot allows you to take a quiz.\n\nCommands:\n/start - Start the quiz\n/help - Get help"
+        "Commands:\n/start - Start the quiz\n/help - Show help\n/end- quizni tugatish va natijalarni olish"
     )
 
-# Function to send the score to the user
-async def send_score(telegram_id: str, score: int, total: int):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    message = f"Your quiz is complete! 🎉\nYou scored: {score} / 30."
+# Send a question to the user
+async def send_question(user_id):
+    if user_id not in user_scores:
+        return
 
-    payload = {
-        "chat_id": telegram_id,
-        "text": message,
-    }
+    user_data = user_scores[user_id]
 
-    try:
-        response = requests.post(url, json=payload)
-        response.raise_for_status()
-        logging.info(f"Score sent to Telegram user {telegram_id}.")
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Failed to send score to Telegram user {telegram_id}: {e}")
+    # Pick a random question
+    question = random.choice(questions)
+
+    # Validate the question and options
+    if not question["question"] or not all(question["options"]):
+        logging.warning("Skipped sending a question due to missing text or options.")
+        await send_question(user_id)  # Send another question
+        return
+
+    # Send the current question
+    await bot.send_poll(
+        chat_id=user_id,
+        question=question["question"],
+        options=question["options"],
+        type="quiz",
+        correct_option_id=question["options"].index(question["correct"]),
+        is_anonymous=False,
+        
+    )
+
+    await bot.send_message(
+        chat_id=user_id,
+        text="Press /end to end the quiz."
+    )
+
+
+# Handle poll answers
+@dp.poll_answer()
+async def handle_poll_answer(poll_answer: types.PollAnswer):
+    user_id = poll_answer.user.id
+    if user_id not in user_scores:
+        return
+
+    user_data = user_scores[user_id]
+    question = random.choice(questions)
+
+    # Check if the answer is correct
+    selected_option = poll_answer.option_ids[0] if poll_answer.option_ids else None
+    if selected_option is not None:
+        user_data["amount"] += 1
+        if question["options"][selected_option] == question["correct"]:
+            user_data["score"] += 1
+
+    # Move to the next question
+    await send_question(user_id)
+
 
 # Main entry point to start the bot
 async def main():
-    dp.include_router(router)
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
+
