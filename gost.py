@@ -7,7 +7,7 @@ from docx import Document
 import asyncio
 
 # Bot configuration
-TELEGRAM_BOT_TOKEN = "6792357240:AAFuFpxFQZ0lxA58xaK-LkJ2ZqWIQjiRsx0"  # Replace with your bot token
+TELEGRAM_BOT_TOKEN = "6792357240:AAGHvSc98g6Lc0hSULk_2ZokY8pIcwg8G5o"  # Replace with your bot token
 logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
