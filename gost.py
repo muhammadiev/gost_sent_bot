@@ -5,72 +5,65 @@ from aiogram.filters import Command
 from aiogram.fsm.storage.memory import MemoryStorage
 from docx import Document
 import asyncio
-
-# Bot configuration
-TELEGRAM_BOT_TOKEN = "6792357240:AAFuFpxFQZ0lxA58xaK-LkJ2ZqWIQjiRsx0"  # Replace with your bot token
-logging.basicConfig(level=logging.INFO)
-
-bot = Bot(token=TELEGRAM_BOT_TOKEN)
-
-dp = Dispatcher(storage=MemoryStorage())
-
-MAX_OPTION_LENGTH = 100  # Telegram's maximum allowed length for poll options
-
-bot = Bot(token=TELEGRAM_BOT_TOKEN, request_timeout=60)
-
 import base64
 import xml.etree.ElementTree as ET
 
+# Bot configuration
+TELEGRAM_BOT_TOKEN = "6792357240:AAGHvSc98g6Lc0hSULk_2ZokY8pIcwg8G5o"  # Replace with your token
+logging.basicConfig(level=logging.INFO)
 
+bot = Bot(token=TELEGRAM_BOT_TOKEN, request_timeout=60)
+dp = Dispatcher(storage=MemoryStorage())
+
+MAX_OPTION_LENGTH = 100  # Telegram max option length
+
+# User and group states
+user_scores = {}  # key: (chat_id, user_id), value: {'score': x, 'amount': y}
+user_current_question = {}  # key: (chat_id, user_id)
+
+# Decode base64 if needed
 def decode_base64(encoded_str):
-    """Helper function to decode base64-encoded strings."""
     try:
         return base64.b64decode(encoded_str).decode('utf-8')
     except Exception as e:
         logging.error(f"Error decoding base64 string: {e}")
         return ""
 
-
+# Load questions from XML
 def load_questions_from_xml(xml_path):
-    """Load questions and answers from an XML file."""
     questions = []
     try:
         tree = ET.parse(xml_path)
         root = tree.getroot()
 
-        for q_elem in root.findall(".//QuestionBlock"):  # Find all QuestionBlock elements
+        for q_elem in root.findall(".//QuestionBlock"):
             question_text_elem = q_elem.find(".//Content/PlainText")
             if question_text_elem is None:
-                logging.warning("No question text found, skipping question.")
                 continue
 
             question_text = question_text_elem.text.strip() if question_text_elem.text else ""
-
-            # Extract answers
             answers = []
             correct_answer = None
+
             for answer_elem in q_elem.findall(".//Answers/Answer"):
                 answer_text_elem = answer_elem.find(".//Content/PlainText")
                 if answer_text_elem is None:
-                    logging.warning("Answer text missing, skipping this answer.")
                     continue
 
                 answer_text = answer_text_elem.text.strip()
                 is_correct = answer_elem.get("IsCorrect") == "Yes"
 
-                # Decode the base64 if needed (only if the base64 part is used in the XML)
-                if answer_text_elem.find(".//RichViewFormatBASE64") is not None:
-                    base64_elem = answer_elem.find(".//RichViewFormatBASE64")
-                    answer_text = decode_base64(base64_elem.text.strip()) if base64_elem is not None else answer_text
+                base64_elem = answer_elem.find(".//RichViewFormatBASE64")
+                if base64_elem is not None:
+                    answer_text = decode_base64(base64_elem.text.strip())
 
                 if is_correct:
                     correct_answer = answer_text
 
                 answers.append(answer_text)
 
-            # Ensure the correct answer is in the options and shuffle them
             if correct_answer and correct_answer not in answers:
-                answers.insert(0, correct_answer)  # Add it to the options list if missing
+                answers.insert(0, correct_answer)
 
             if question_text and correct_answer and all(answers):
                 random.shuffle(answers)
@@ -79,108 +72,116 @@ def load_questions_from_xml(xml_path):
                     "correct": correct_answer,
                     "options": answers
                 })
-            else:
-                logging.warning(f"Skipped an invalid question: {question_text}")
 
-        logging.info(f"{len(questions)} questions loaded successfully from XML.")
+        logging.info(f"{len(questions)} questions loaded from XML.")
 
     except Exception as e:
-        logging.error(f"Error loading questions from XML: {e}")
+        logging.error(f"Error loading questions: {e}")
     return questions
 
-
-questions = load_questions_from_xml("quiz.xml")  # Replace with your .docx file path
-user_scores = {}  # Dictionary to track user scores
-user_current_question = {}  # Store the currently asked question
+questions = load_questions_from_xml("quiz.xml")
 
 
-# Command to start the quiz
+# START Command
 @dp.message(Command("start"))
 async def start_quiz(message: types.Message):
+    chat_id = message.chat.id
     user_id = message.from_user.id
-    user_scores[user_id] = {"score": 0, "amount": 0}  # Initialize user score
-    await message.answer("gost quiz botga xush kelibsiz.\nType /help kommadalar haqida.")
-    await send_question(user_id)
+    key = (chat_id, user_id)
+
+    user_scores[key] = {"score": 0, "amount": 0}
+    await message.reply("📚 Quiz boshlandi! Har bir to‘g‘ri javob 1 ball.\n/help buyrug‘i yordam beradi.")
+    await send_question(chat_id, user_id)
 
 
-# Command to end the quiz
+# END Command
 @dp.message(Command("end"))
 async def end_quiz(message: types.Message):
+    chat_id = message.chat.id
     user_id = message.from_user.id
-    if user_id in user_scores:
-        score = user_scores[user_id]["score"]
-        total_questions = user_scores[user_id]["amount"]
-        del user_scores[user_id]  # Clear user data
-        del user_current_question[user_id]  # Remove current question tracking
-        await message.answer(f"Quiz ended!! 🎉 Your final score: {score}/{total_questions}\nQayta quizni boshlash uchun /start ni bosing")
-        await bot.send_message(5910341036,f'{message.from_user.first_name} ended the quiz and {score}/{total_questions}')
+    key = (chat_id, user_id)
+
+    if key in user_scores:
+        score = user_scores[key]["score"]
+        total = user_scores[key]["amount"]
+        del user_scores[key]
+        user_current_question.pop(key, None)
+
+        await message.reply(f"✅ Quiz tugadi! Yakuniy natija: {score}/{total}")
+        await bot.send_message(5910341036, f'{message.from_user.first_name} ({user_id}) quizni {score}/{total} bilan tugatdi.')
     else:
-        await message.answer("You haven't started a quiz yet. Type /start to begin.")
+        await message.reply("Siz hali quizni boshlamagansiz. Boshlash uchun /start ni bosing.")
 
 
-# Command to display help
+# HELP Command
 @dp.message(Command("help"))
 async def help_command(message: types.Message):
-    await message.answer(
-        "Commands:\n/start - Start the quiz\n/help - Show help\n/end - Quizni tugatish va natijalarni olish"
+    await message.reply(
+        "📘 Buyruqlar:\n"
+        "/start - Quizni boshlash\n"
+        "/help - Yordam\n"
+        "/end - Quizni yakunlash"
     )
 
 
-# Send a question to the user
-async def send_question(user_id):
-    if user_id not in user_scores:
+# Send random question
+async def send_question(chat_id, user_id):
+    key = (chat_id, user_id)
+    if key not in user_scores:
         return
 
-    # Pick a random question
     question = random.choice(questions)
-
-    # Validate the question and options
     if not question["question"] or not all(question["options"]):
-        logging.warning("Skipped sending a question due to missing text or options.")
-        await send_question(user_id)  # Send another question
+        await send_question(chat_id, user_id)
         return
 
-    # Store the question for reference during scoring
-    user_current_question[user_id] = question
+    user_current_question[key] = question
 
-    # Send the current question
-    await bot.send_poll(
-        chat_id=user_id,
-        question=question["question"],
-        options=question["options"],
-        type="quiz",
-        correct_option_id=question["options"].index(question["correct"]),
-        is_anonymous=False,
-    )
+    try:
+        await bot.send_poll(
+            chat_id=chat_id,
+            question=question["question"],
+            options=question["options"],
+            type="quiz",
+            correct_option_id=question["options"].index(question["correct"]),
+            is_anonymous=False,
+        )
+    except Exception as e:
+        logging.warning(f"Poll sending failed: {e}")
+        await bot.send_message(chat_id, "❌ Savolni yuborishda xatolik yuz berdi.")
+        return
 
-    await bot.send_message(
-        chat_id=user_id,
-        text="Press /end to end the quiz."
-    )
+    await bot.send_message(chat_id, "⏳ Keyingi savol avtomatik yuboriladi. Tugatish: /end")
 
 
-# Handle poll answers
+# Handle answers
 @dp.poll_answer()
 async def handle_poll_answer(poll_answer: types.PollAnswer):
     user_id = poll_answer.user.id
-    if user_id not in user_scores or user_id not in user_current_question:
+
+    # Find the active chat the user was in (brute search)
+    for key in user_scores:
+        if key[1] == user_id:
+            chat_id = key[0]
+            break
+    else:
         return
 
-    user_data = user_scores[user_id]
-    question = user_current_question[user_id]  # Get the last asked question
+    key = (chat_id, user_id)
+    if key not in user_current_question:
+        return
 
-    # Check if the answer is correct
-    selected_option = poll_answer.option_ids[0] if poll_answer.option_ids else None
-    if selected_option is not None:
-        user_data["amount"] += 1
-        if question["options"][selected_option] == question["correct"]:
-            user_data["score"] += 1
+    selected_option = poll_answer.option_ids[0]
+    question = user_current_question[key]
+    user_scores[key]["amount"] += 1
 
-    # Move to the next question
-    await send_question(user_id)
+    if question["options"][selected_option] == question["correct"]:
+        user_scores[key]["score"] += 1
+
+    await send_question(chat_id, user_id)
 
 
-# Main entry point to start the bot
+# Start polling
 async def main():
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
