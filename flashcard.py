@@ -12,7 +12,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.types import Message, CallbackQuery
 from docx import Document
 
-API_TOKEN = "6320765562:AAHTfyPpJ3262UidBv2aG9HY18w-DU1yuhc"
+API_TOKEN = "6320765562:AAEFoVQGrVEAZ-Cdl61sWOQgpTy71cWe4wI"
 
 logging.basicConfig(level=logging.INFO)
 
